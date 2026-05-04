@@ -40,7 +40,11 @@ intent rather than revealing plaintext values.
 
 ## Testing
 
-Install Foundry, then run:
+Install Foundry, initialize dependencies, then run:
+
+```sh
+git submodule update --init --recursive
+```
 
 ```sh
 forge test
