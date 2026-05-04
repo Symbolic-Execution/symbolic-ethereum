@@ -12,7 +12,7 @@ library SYM {
     /// @dev Storage slot for the SymVM configuration.
     ///      keccak256("symbolic.symvm.config.v1")
     bytes32 private constant _CONFIG_SLOT =
-        0x7e4c74e7ac1906d57e4e7c1a5b3a21d73e68da8e9c7b5f0a3d2c1b0e9f8a7b6c;
+        keccak256("symbolic.symvm.config.v1");
 
     // ── Configuration ───────────────────────────────────────────────────
 
