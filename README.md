@@ -1,66 +1,47 @@
-## Foundry
+# Symbolic Ethereum
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Solidity reference contracts for the Symbolic confidential execution model.
+See the [Symbolic specifications](../symbolic-specs/README.md) for the full
+system design.
 
-Foundry consists of:
+This package contains:
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- `SymVM`: an on-chain symbolic handle registry and operation event surface
+- `SYM`: a typed Solidity library for calling `SymVM`
+- `ERC7984`: a draft confidential fungible token built on `SYM`
 
-## Documentation
+## Contracts
 
-https://book.getfoundry.sh/
+### `SymVM`
 
-## Usage
+`SymVM` is the low-level on-chain contract.
 
-### Build
+It creates handles from:
 
-```shell
-$ forge build
-```
+- encrypted ciphertext imports
+- public plaintext constants
+- symbolic operations
 
-### Test
+Supported symbolic operations:
 
-```shell
-$ forge test
-```
+- `add`, `sub`
+- `eq`, `lt`, `lte`, `gt`, `gte`
+- `and_`, `or_`, `not_`
+- `select`
 
-### Format
+Each operation returns a fresh `bytes32` handle and emits `OperationRequestedV1`.
 
-```shell
-$ forge fmt
-```
+### `ERC7984`
 
-### Gas Snapshots
+`ERC7984` is a draft confidential fungible token implementation.
 
-```shell
-$ forge snapshot
-```
+Balances and transfer amounts are private handles. Transfers express symbolic
+intent rather than revealing plaintext values.
 
-### Anvil
+## Testing
 
-```shell
-$ anvil
-```
+Install Foundry, then run:
 
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+```sh
+forge test
 ```
