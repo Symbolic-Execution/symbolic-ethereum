@@ -52,4 +52,10 @@ If you find improvements to make:
 
 If the code is already clean and well-structured, do nothing.
 
-Once complete, output <promise>COMPLETE</promise>.
+Once complete, output a JSON object wrapped in `<review>` tags:
+
+<review>
+{"approved": true, "summary": "Change is correct and ready to merge.", "blockers": [], "testNotes": "npm run typecheck and npm test passed."}
+</review>
+
+Set `approved` to `false` if there are correctness, safety, merge-readiness, or test blockers you cannot fix in this review pass. Put concrete unresolved blockers in `blockers`.
