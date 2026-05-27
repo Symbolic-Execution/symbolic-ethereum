@@ -10,6 +10,10 @@ import {suint256, SBOOL, SUINT256} from "../src/symvm/Types.sol";
 contract ERC7984Harness is ERC7984 {
     constructor(address symvm) ERC7984("Symbolic Token", "SYM", symvm) {}
 
+    function contractURI() public pure override returns (string memory) {
+        return "https://symbolic.example/token.json";
+    }
+
     function amountPlain(uint256 value) external returns (bytes32) {
         return suint256.unwrap(SYM.fromPlaintext(value));
     }
@@ -210,6 +214,66 @@ contract ERC7984Test is Test {
         vm.prank(OPERATOR);
         vm.expectRevert("not operator");
         token.confidentialTransferFrom(ALICE, BOB, laterAmount);
+    }
+
+    function testSupportsInterface() public view {
+        // ERC-7984 interface id (per draft standard).
+        assertTrue(token.supportsInterface(0x4958f2a4));
+        // ERC-165 interface id.
+        assertTrue(token.supportsInterface(0x01ffc9a7));
+        // Per ERC-165, 0xffffffff must return false.
+        assertFalse(token.supportsInterface(0xffffffff));
+        // An unrelated id returns false.
+        assertFalse(token.supportsInterface(0xdeadbeef));
+    }
+
+    function testContractURI() public view {
+        assertEq(token.contractURI(), "https://symbolic.example/token.json");
+    }
+
+    function testTransferWithDataPreservesBehavior() public {
+        bytes32 aliceBalance = token.mintPlain(ALICE, 10);
+        bytes32 amount = token.amountPlain(4);
+        bytes32 zero = _tokenHandle(2);
+        bytes32 canTransfer = _tokenHandle(3);
+        bytes32 transferValue = _tokenHandle(4);
+        bytes32 newAliceBalance = _tokenHandle(5);
+
+        _expectPlain(2, 0);
+        _expectOperation(3, SBOOL, 7, _inputs2(aliceBalance, amount));
+        _expectOperation(4, SUINT256, 11, _inputs3(canTransfer, amount, zero));
+        _expectOperation(5, SUINT256, 2, _inputs2(aliceBalance, transferValue));
+        _expectTransfer(ALICE, BOB, transferValue);
+
+        vm.prank(ALICE);
+        bytes32 returned =
+            token.confidentialTransfer(BOB, amount, hex"c0ffee");
+
+        assertEq(returned, transferValue);
+        assertEq(token.confidentialBalanceOf(ALICE), newAliceBalance);
+        assertEq(token.confidentialBalanceOf(BOB), transferValue);
+        assertTrue(symvm.isAllowed(newAliceBalance, ALICE));
+        assertTrue(symvm.isAllowed(transferValue, BOB));
+    }
+
+    function testTransferFromWithDataPreservesBehavior() public {
+        token.mintPlain(ALICE, 10);
+        bytes32 amount = token.amountPlain(1);
+
+        vm.prank(OPERATOR);
+        vm.expectRevert("not operator");
+        token.confidentialTransferFrom(ALICE, BOB, amount, hex"abcd");
+
+        uint48 expiry = uint48(block.timestamp + 10);
+        vm.prank(ALICE);
+        token.setOperator(OPERATOR, expiry);
+
+        vm.prank(OPERATOR);
+        bytes32 returned =
+            token.confidentialTransferFrom(ALICE, BOB, amount, hex"abcd");
+
+        assertEq(token.confidentialBalanceOf(BOB), returned);
+        assertTrue(symvm.isAllowed(returned, BOB));
     }
 
     function _expectPlain(uint64 nonce, uint256 value) private {

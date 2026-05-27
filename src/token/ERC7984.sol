@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IERC7984} from "./IERC7984.sol";
+import {IERC7984, IERC165} from "./IERC7984.sol";
 import {SYM} from "../symvm/SYM.sol";
 import {suint256, sbool} from "../symvm/Types.sol";
 
@@ -10,6 +10,9 @@ import {suint256, sbool} from "../symvm/Types.sol";
 ///         built on the SYM library.
 /// @dev TODO: implement full ERC-7984 token logic.
 abstract contract ERC7984 is IERC7984 {
+    /// @dev ERC-7984 interface identifier, per the draft standard.
+    bytes4 private constant _ERC7984_INTERFACE_ID = 0x4958f2a4;
+
     // ── State ───────────────────────────────────────────────────────────
 
     string private _name;
@@ -29,10 +32,25 @@ abstract contract ERC7984 is IERC7984 {
         SYM.setSymVM(symvm);
     }
 
+    // ── ERC-165 ─────────────────────────────────────────────────────────
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view virtual returns (bool) {
+        return interfaceId == type(IERC165).interfaceId
+            || interfaceId == _ERC7984_INTERFACE_ID;
+    }
+
     // ── Metadata ────────────────────────────────────────────────────────
 
     function name() external view returns (string memory) {
         return _name;
+    }
+
+    /// @notice Returns a URI for contract-level metadata.
+    /// @dev Empty by default; implementers may override.
+    function contractURI() public view virtual returns (string memory) {
+        return "";
     }
 
     function symbol() external view returns (string memory) {
@@ -64,10 +82,28 @@ abstract contract ERC7984 is IERC7984 {
         return _transfer(msg.sender, to, suint256.wrap(amount));
     }
 
+    function confidentialTransfer(
+        address to,
+        bytes32 amount,
+        bytes calldata
+    ) external returns (bytes32 transferred) {
+        return _transfer(msg.sender, to, suint256.wrap(amount));
+    }
+
     function confidentialTransferFrom(
         address from,
         address to,
         bytes32 amount
+    ) external returns (bytes32 transferred) {
+        require(isOperator(from, msg.sender), "not operator");
+        return _transfer(from, to, suint256.wrap(amount));
+    }
+
+    function confidentialTransferFrom(
+        address from,
+        address to,
+        bytes32 amount,
+        bytes calldata
     ) external returns (bytes32 transferred) {
         require(isOperator(from, msg.sender), "not operator");
         return _transfer(from, to, suint256.wrap(amount));
