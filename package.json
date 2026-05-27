@@ -1,0 +1,24 @@
+{
+  "name": "symbolic-ethereum",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Solidity reference contracts for the Symbolic confidential execution model. See the [Symbolic specifications](../symbolic-specs/README.md) for the full system design.",
+  "scripts": {
+    "sandcastle": "tsx .sandcastle/main.mts",
+    "test": "forge test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Symbolic-Execution/symbolic-ethereum.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Symbolic-Execution/symbolic-ethereum/issues"
+  },
+  "homepage": "https://github.com/Symbolic-Execution/symbolic-ethereum#readme",
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.6.4",
+    "tsx": "^4.22.3",
+    "zod": "^4.4.3"
+  }
+}
