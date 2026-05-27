@@ -11,11 +11,11 @@ contract SymVM is ISymVM {
 
     /// @dev AAD schema version. Mirrors the `version` field of the spec's
     ///      `SystemInputAadV1`.
-    uint8 internal constant AAD_VERSION_V1 = 1;
+    uint8 private constant AAD_VERSION_V1 = 1;
 
     /// @dev `AadKind::SystemInput` from the spec. Client-encrypted imports
     ///      must carry this kind.
-    uint8 internal constant AAD_KIND_SYSTEM_INPUT = 1;
+    uint8 private constant AAD_KIND_SYSTEM_INPUT = 1;
 
     bytes32 private constant TYPE_TAG_SUINT256 = keccak256(bytes("suint256"));
     bytes32 private constant TYPE_TAG_SBOOL = keccak256(bytes("sbool"));
