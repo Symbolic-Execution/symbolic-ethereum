@@ -6,12 +6,51 @@ import {SBOOL, SUINT256} from "./Types.sol";
 
 /// @title SymVM
 /// @notice On-chain handle registry, operation dispatch, and authorization.
-/// @dev TODO: implement ciphertext AAD validation.
 contract SymVM is ISymVM {
+    // ── Ciphertext envelope ─────────────────────────────────────────────
+
+    /// @dev AAD schema version. Mirrors the `version` field of the spec's
+    ///      `SystemInputAadV1`.
+    uint8 internal constant AAD_VERSION_V1 = 1;
+
+    /// @dev `AadKind::SystemInput` from the spec. Client-encrypted imports
+    ///      must carry this kind.
+    uint8 internal constant AAD_KIND_SYSTEM_INPUT = 1;
+
+    bytes32 private constant TYPE_TAG_SUINT256 = keccak256(bytes("suint256"));
+    bytes32 private constant TYPE_TAG_SBOOL = keccak256(bytes("sbool"));
+
+    /// @dev On-chain projection of the spec's CBOR `SystemInputAadV1`. The
+    ///      reference contract uses `abi.encode` for the AAD instead of
+    ///      canonical CBOR: parsing CBOR on-chain is impractical, while the
+    ///      field set and validation order match the spec's import rules.
+    struct SystemInputAadV1 {
+        uint8 version;
+        uint8 kind;
+        uint256 chainId;
+        bytes32 domainId;
+        address contractAddr;
+        string typeTag;
+        bytes32 keyId;
+    }
+
+    /// @dev On-chain projection of the spec's CBOR `SystemCiphertextV1`. Only
+    ///      the fields needed for binding validation (`keyId`, `aad`) are
+    ///      interpreted; `ciphertext` is opaque and forwarded in the event.
+    struct SystemCiphertextV1 {
+        bytes32 keyId;
+        bytes ciphertext;
+        bytes aad;
+    }
+
     // ── State ───────────────────────────────────────────────────────────
 
     /// @dev The domain identifier for this symVM instance.
     bytes32 public immutable domainId;
+
+    /// @dev The currently active system key identifier. Imported ciphertexts
+    ///      must be bound to this key.
+    bytes32 public immutable systemKeyId;
 
     /// @dev Per-contract handle nonce: (contract => nonce).
     mapping(address => uint64) private _nonces;
@@ -54,8 +93,9 @@ contract SymVM is ISymVM {
 
     // ── Constructor ─────────────────────────────────────────────────────
 
-    constructor(bytes32 _domainId) {
+    constructor(bytes32 _domainId, bytes32 _systemKeyId) {
         domainId = _domainId;
+        systemKeyId = _systemKeyId;
     }
 
     // ── Handle creation ─────────────────────────────────────────────────
@@ -65,7 +105,7 @@ contract SymVM is ISymVM {
         bytes calldata systemCiphertext
     ) external returns (bytes32 handleId) {
         _requireValidHandleType(handleType);
-        // TODO: validate aad bindings (contract, key_id, type_tag, domain_id, chain_id)
+        _validateImportBindings(handleType, systemCiphertext);
         handleId = _createHandle(msg.sender, handleType);
 
         emit HandleImportedV1(
@@ -245,6 +285,41 @@ contract SymVM is ISymVM {
 
     function _requireValidHandleType(uint8 handleType) private pure {
         require(handleType == SUINT256 || handleType == SBOOL, "invalid type");
+    }
+
+    /// @dev Validate the AAD bindings of an imported ciphertext against the
+    ///      execution context before a handle is created. Mirrors the import
+    ///      validation steps in the symVM event-surface spec.
+    function _validateImportBindings(
+        uint8 handleType,
+        bytes calldata systemCiphertext
+    ) private view {
+        require(systemCiphertext.length >= 32, "malformed ciphertext");
+        SystemCiphertextV1 memory envelope =
+            abi.decode(systemCiphertext, (SystemCiphertextV1));
+
+        require(envelope.aad.length >= 32, "malformed aad");
+        SystemInputAadV1 memory aad =
+            abi.decode(envelope.aad, (SystemInputAadV1));
+
+        require(aad.version == AAD_VERSION_V1, "bad aad version");
+        require(aad.kind == AAD_KIND_SYSTEM_INPUT, "bad aad kind");
+        require(envelope.keyId == aad.keyId, "key_id mismatch");
+        require(aad.keyId == systemKeyId, "inactive key");
+        require(aad.contractAddr == msg.sender, "caller mismatch");
+        require(_typeTagMatches(handleType, aad.typeTag), "type tag mismatch");
+        require(aad.domainId == domainId, "domain mismatch");
+        require(aad.chainId == block.chainid, "chain mismatch");
+    }
+
+    function _typeTagMatches(
+        uint8 handleType,
+        string memory typeTag
+    ) private pure returns (bool) {
+        bytes32 tag = keccak256(bytes(typeTag));
+        if (handleType == SUINT256) return tag == TYPE_TAG_SUINT256;
+        if (handleType == SBOOL) return tag == TYPE_TAG_SBOOL;
+        return false;
     }
 
     function _requireHandleType(

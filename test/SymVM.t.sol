@@ -49,6 +49,7 @@ contract SymVMUserHarness {
 
 contract SymVMTest is Test {
     bytes32 private constant DOMAIN = keccak256("symbolic.test.domain");
+    bytes32 private constant KEY_ID = keccak256("symbolic.test.key");
 
     SymVM private symvm;
 
@@ -78,11 +79,11 @@ contract SymVMTest is Test {
     );
 
     function setUp() public {
-        symvm = new SymVM(DOMAIN);
+        symvm = new SymVM(DOMAIN, KEY_ID);
     }
 
     function testSourceHandleCreationEmitsDeterministicIds() public {
-        bytes memory ciphertext = hex"010203";
+        bytes memory ciphertext = _validEnvelope(SBOOL, address(this));
         bytes32 expectedPlain = _expectedHandle(address(this), 0);
         bytes32 expectedImport = _expectedHandle(address(this), 1);
 
@@ -103,6 +104,89 @@ contract SymVMTest is Test {
         );
         bytes32 imported = symvm.importCiphertext(SBOOL, ciphertext);
         assertEq(imported, expectedImport);
+    }
+
+    function testImportAcceptsWellBoundCiphertextForBothTypes() public {
+        bytes32 a = symvm.importCiphertext(
+            SUINT256, _validEnvelope(SUINT256, address(this))
+        );
+        assertEq(a, _expectedHandle(address(this), 0));
+
+        bytes32 b = symvm.importCiphertext(
+            SBOOL, _validEnvelope(SBOOL, address(this))
+        );
+        assertEq(b, _expectedHandle(address(this), 1));
+    }
+
+    function testImportRejectsMismatchedCaller() public {
+        // AAD bound to a different contract than msg.sender.
+        bytes memory env = _validEnvelope(SUINT256, address(0xBEEF));
+        vm.expectRevert("caller mismatch");
+        symvm.importCiphertext(SUINT256, env);
+    }
+
+    function testImportRejectsMismatchedDomain() public {
+        SymVM.SystemInputAadV1 memory aad = _baseAad(SUINT256, address(this));
+        aad.domainId = keccak256("other.domain");
+        vm.expectRevert("domain mismatch");
+        symvm.importCiphertext(SUINT256, _encode(aad, KEY_ID));
+    }
+
+    function testImportRejectsMismatchedChainId() public {
+        SymVM.SystemInputAadV1 memory aad = _baseAad(SUINT256, address(this));
+        aad.chainId = block.chainid + 1;
+        vm.expectRevert("chain mismatch");
+        symvm.importCiphertext(SUINT256, _encode(aad, KEY_ID));
+    }
+
+    function testImportRejectsMismatchedTypeTag() public {
+        // Envelope tagged as sbool, but imported as suint256.
+        bytes memory env = _validEnvelope(SBOOL, address(this));
+        vm.expectRevert("type tag mismatch");
+        symvm.importCiphertext(SUINT256, env);
+    }
+
+    function testImportRejectsInactiveKey() public {
+        SymVM.SystemInputAadV1 memory aad = _baseAad(SUINT256, address(this));
+        aad.keyId = keccak256("stale.key");
+        // Envelope keyId matches the (stale) aad keyId, so the internal
+        // consistency check passes but the active-key check fails.
+        vm.expectRevert("inactive key");
+        symvm.importCiphertext(SUINT256, _encode(aad, aad.keyId));
+    }
+
+    function testImportRejectsEnvelopeKeyIdMismatch() public {
+        SymVM.SystemInputAadV1 memory aad = _baseAad(SUINT256, address(this));
+        // Envelope keyId differs from the aad keyId.
+        vm.expectRevert("key_id mismatch");
+        symvm.importCiphertext(SUINT256, _encode(aad, keccak256("envelope.key")));
+    }
+
+    function testImportRejectsBadVersionAndKind() public {
+        SymVM.SystemInputAadV1 memory badVersion =
+            _baseAad(SUINT256, address(this));
+        badVersion.version = 2;
+        vm.expectRevert("bad aad version");
+        symvm.importCiphertext(SUINT256, _encode(badVersion, KEY_ID));
+
+        SymVM.SystemInputAadV1 memory badKind = _baseAad(SUINT256, address(this));
+        badKind.kind = 2;
+        vm.expectRevert("bad aad kind");
+        symvm.importCiphertext(SUINT256, _encode(badKind, KEY_ID));
+    }
+
+    function testImportRejectsMalformedPayloads() public {
+        vm.expectRevert("malformed ciphertext");
+        symvm.importCiphertext(SUINT256, hex"010203");
+
+        // Well-formed envelope wrapper, but the aad bytes are too short.
+        SymVM.SystemCiphertextV1 memory envelope = SymVM.SystemCiphertextV1({
+            keyId: KEY_ID,
+            ciphertext: hex"cafe",
+            aad: hex"0102"
+        });
+        vm.expectRevert("malformed aad");
+        symvm.importCiphertext(SUINT256, abi.encode(envelope));
     }
 
     function testSourceHandleValidation() public {
@@ -236,6 +320,44 @@ contract SymVMTest is Test {
         _expectOperation(address(user), 0, SUINT256, 1, _inputs2(a, b));
         bytes32 output = user.add(a, b);
         assertEq(output, _expectedHandle(address(user), 0));
+    }
+
+    function _typeTag(uint8 handleType) private pure returns (string memory) {
+        return handleType == SUINT256 ? "suint256" : "sbool";
+    }
+
+    function _baseAad(
+        uint8 handleType,
+        address contractAddr
+    ) private view returns (SymVM.SystemInputAadV1 memory) {
+        return SymVM.SystemInputAadV1({
+            version: 1,
+            kind: 1,
+            chainId: block.chainid,
+            domainId: DOMAIN,
+            contractAddr: contractAddr,
+            typeTag: _typeTag(handleType),
+            keyId: KEY_ID
+        });
+    }
+
+    function _encode(
+        SymVM.SystemInputAadV1 memory aad,
+        bytes32 envelopeKeyId
+    ) private pure returns (bytes memory) {
+        SymVM.SystemCiphertextV1 memory envelope = SymVM.SystemCiphertextV1({
+            keyId: envelopeKeyId,
+            ciphertext: hex"deadbeef",
+            aad: abi.encode(aad)
+        });
+        return abi.encode(envelope);
+    }
+
+    function _validEnvelope(
+        uint8 handleType,
+        address contractAddr
+    ) private view returns (bytes memory) {
+        return _encode(_baseAad(handleType, contractAddr), KEY_ID);
     }
 
     function _expectOperation(

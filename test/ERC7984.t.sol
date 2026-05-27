@@ -26,6 +26,7 @@ contract ERC7984Harness is ERC7984 {
 
 contract ERC7984Test is Test {
     bytes32 private constant DOMAIN = keccak256("symbolic.test.domain");
+    bytes32 private constant KEY_ID = keccak256("symbolic.test.key");
 
     address private constant ALICE = address(0xA11CE);
     address private constant BOB = address(0xB0B);
@@ -65,7 +66,7 @@ contract ERC7984Test is Test {
 
     function setUp() public {
         vm.warp(100);
-        symvm = new SymVM(DOMAIN);
+        symvm = new SymVM(DOMAIN, KEY_ID);
         token = new ERC7984Harness(address(symvm));
     }
 
