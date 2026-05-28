@@ -1,8 +1,10 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
+import { claudeAgent } from "./agents.mts";
 import {
   CommandError,
+  formatError,
   git,
   pushBranch,
   redactSecrets,
@@ -23,12 +25,20 @@ import {
   type QualityGateResult,
   type Review,
 } from "./review-output.mts";
+import {
+  readCachedApprovedReview,
+  writeCachedReview,
+} from "./review-cache.mts";
+import { repairManagedWorktreeSubmodules } from "./worktree-repair.mts";
 
 const hooks = {
   sandbox: { onSandboxReady: [{ command: "npm install" }] },
 };
 
 const copyToWorktree = ["node_modules"];
+const plannerAgent = claudeAgent("claude-opus-4-7");
+const implementerAgent = claudeAgent("claude-opus-4-7");
+const reviewerAgent = claudeAgent("claude-sonnet-4-6");
 
 const planSchema = z.object({
   issues: z.array(
@@ -46,7 +56,7 @@ export async function planIssues(
     sandbox: docker({ env: { GH_TOKEN: token } }),
     name: "planner",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-opus-4-7"),
+    agent: plannerAgent,
     promptFile: "./.sandcastle/plan-prompt.md",
     promptArgs: {
       ISSUES_JSON: JSON.stringify(openIssues, null, 2),
@@ -81,6 +91,8 @@ export async function runIssueWorkflow(options: {
   defaultBranch: string;
 }) {
   const { issue, github, githubClient, defaultBranch } = options;
+  await repairManagedWorktreeSubmodules(issue.branch);
+
   const sandbox = await sandcastle.createSandbox({
     branch: issue.branch,
     baseBranch: `origin/${defaultBranch}`,
@@ -89,7 +101,7 @@ export async function runIssueWorkflow(options: {
     copyToWorktree,
   });
 
-  let totalCommits = 0;
+  let branchCommits: string[] = [];
   let review: Review = {
     approved: false,
     summary: "Reviewer did not run.",
@@ -106,7 +118,7 @@ export async function runIssueWorkflow(options: {
     const implement = await sandbox.run({
       name: "implementer",
       maxIterations: 100,
-      agent: sandcastle.claudeCode("claude-opus-4-7"),
+      agent: implementerAgent,
       promptFile: "./.sandcastle/implement-prompt.md",
       promptArgs: {
         TASK_ID: issue.id,
@@ -115,25 +127,55 @@ export async function runIssueWorkflow(options: {
       },
     });
 
-    totalCommits += implement.commits.length;
-    if (implement.commits.length === 0) {
+    branchCommits = await listBranchCommitsSince(
+      `origin/${defaultBranch}`,
+      issue.branch,
+    );
+
+    if (branchCommits.length === 0) {
       console.log(`#${issue.number}: no commits produced; no PR created.`);
       return;
     }
 
-    const reviewResult = await sandbox.run({
-      name: "reviewer",
-      maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-opus-4-7"),
-      promptFile: "./.sandcastle/review-prompt.md",
-      promptArgs: {
-        BRANCH: issue.branch,
-        TARGET_BRANCH: `origin/${defaultBranch}`,
-      },
-    });
+    if (implement.commits.length === 0) {
+      console.log(
+        `#${issue.number}: no new commits this run; reviewing ${branchCommits.length} existing commit(s).`,
+      );
+    }
 
-    totalCommits += reviewResult.commits.length;
-    review = parseReview(reviewResult.stdout);
+    const headShaBeforeReview = await branchHeadSha(issue.branch);
+    const cachedReview = await readCachedApprovedReview(
+      issue.branch,
+      headShaBeforeReview,
+    );
+
+    if (cachedReview) {
+      review = cachedReview;
+      console.log(
+        `#${issue.number}: using cached approved review for ${headShaBeforeReview.slice(0, 7)}.`,
+      );
+    } else {
+      const reviewResult = await sandbox.run({
+        name: "reviewer",
+        maxIterations: 1,
+        agent: reviewerAgent,
+        promptFile: "./.sandcastle/review-prompt.md",
+        promptArgs: {
+          BRANCH: issue.branch,
+        },
+      });
+
+      review = parseReview(reviewResult.stdout);
+    }
+    branchCommits = await listBranchCommitsSince(
+      `origin/${defaultBranch}`,
+      issue.branch,
+    );
+    await writeCachedReview(
+      issue.branch,
+      await branchHeadSha(issue.branch),
+      review,
+    );
 
     if (review.approved) {
       gate = await runQualityGates(sandbox.worktreePath);
@@ -149,7 +191,7 @@ export async function runIssueWorkflow(options: {
     }
   }
 
-  if (totalCommits === 0) {
+  if (branchCommits.length === 0) {
     console.log(`#${issue.number}: no commits produced; no PR created.`);
     return;
   }
@@ -197,7 +239,7 @@ export async function runIssueWorkflow(options: {
         "",
         "Reason:",
         "```",
-        truncateForComment(redactSecrets(String(error), github.token)),
+        truncateForComment(redactSecrets(formatError(error), github.token)),
         "```",
       ].join("\n"),
     );
@@ -230,7 +272,24 @@ async function runQualityGates(worktreePath: string): Promise<QualityGateResult>
     }
   }
 
-  const status = await git(["status", "--porcelain"], { cwd: worktreePath });
+  let status;
+  try {
+    status = await git(["status", "--porcelain", "--ignore-submodules=all"], {
+      cwd: worktreePath,
+    });
+  } catch (error) {
+    if (error instanceof CommandError) {
+      return {
+        passed: false,
+        summary: `git status failed with exit code ${error.exitCode}.`,
+        details: truncateForComment(
+          [error.stdout, error.stderr].filter(Boolean).join("\n"),
+        ),
+      };
+    }
+    throw error;
+  }
+
   if (status.stdout.trim()) {
     return {
       passed: false,
@@ -240,6 +299,18 @@ async function runQualityGates(worktreePath: string): Promise<QualityGateResult>
   }
 
   return { passed: true, summary: "npm run typecheck and npm test passed." };
+}
+
+async function listBranchCommitsSince(baseRef: string, branch: string) {
+  const result = await git(["rev-list", `${baseRef}..${branch}`, "--reverse"]);
+  return result.stdout
+    .trim()
+    .split("\n")
+    .filter((sha) => sha.length > 0);
+}
+
+async function branchHeadSha(branch: string) {
+  return (await git(["rev-parse", branch])).stdout.trim();
 }
 
 function branchForIssue(id: string) {
