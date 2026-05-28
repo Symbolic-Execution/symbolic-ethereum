@@ -10,7 +10,9 @@ import {suint256, sbool} from "../symvm/Types.sol";
 ///         built on the SYM library.
 /// @dev TODO: implement full ERC-7984 token logic.
 abstract contract ERC7984 is IERC7984 {
-    /// @dev ERC-7984 interface identifier, per the draft standard.
+    /// @dev Canonical ERC-7984 interface id mandated by the standard. Hardcoded
+    ///      rather than derived via `type(IERC7984).interfaceId`, which yields a
+    ///      different value for this interface's function set.
     bytes4 private constant _ERC7984_INTERFACE_ID = 0x4958f2a4;
 
     // ── State ───────────────────────────────────────────────────────────
