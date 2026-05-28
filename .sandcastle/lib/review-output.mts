@@ -3,7 +3,7 @@ import type { PlannedIssue } from "./github-client.mts";
 
 const COMMENT_OUTPUT_LIMIT = 6_000;
 
-const reviewSchema = z.object({
+export const reviewSchema = z.object({
   approved: z.boolean(),
   summary: z.string(),
   blockers: z.array(z.string()).default([]),

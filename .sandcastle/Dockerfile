@@ -15,6 +15,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Install forge for `npm test` / `forge test`
+ARG TARGETARCH
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+  && case "$arch" in \
+    amd64|x86_64) forge_package="@foundry-rs/forge-linux-amd64" ;; \
+    arm64|aarch64) forge_package="@foundry-rs/forge-linux-arm64" ;; \
+    *) echo "Unsupported architecture for forge: $arch" >&2; exit 1 ;; \
+  esac \
+  && npm install -g "${forge_package}@1.7.1"
+
+# Install Claude Code CLI for Sandcastle agents.
+RUN npm install -g @anthropic-ai/claude-code@2.1.154
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -24,12 +37,6 @@ ARG AGENT_GID=1000
 # Rename the base image's "node" user to "agent" and align UID/GID.
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
-
-# Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-# Add Claude to PATH
-ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 

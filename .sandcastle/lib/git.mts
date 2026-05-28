@@ -82,7 +82,7 @@ export async function runCommand(
         maxBuffer: COMMAND_MAX_BUFFER,
       },
       (error, stdout, stderr) => {
-        const envToken = bearerTokenFromHeader(options.env?.GIT_CONFIG_VALUE_0);
+        const envToken = tokenFromAuthHeader(options.env?.GIT_CONFIG_VALUE_0);
         const cleanStdout = redactSecrets(String(stdout), envToken);
         const cleanStderr = redactSecrets(String(stderr), envToken);
 
@@ -106,13 +106,28 @@ export async function runCommand(
   });
 }
 
+export function formatError(error: unknown) {
+  if (!(error instanceof CommandError)) {
+    return String(error);
+  }
+
+  const output = [error.stdout, error.stderr].filter(Boolean).join("\n").trim();
+  return output.length > 0 ? `${error.message}\n${output}` : error.message;
+}
+
 function authenticatedGitEnv(token: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-    GIT_CONFIG_VALUE_0: `AUTHORIZATION: bearer ${token}`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicGitAuth(token)}`,
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
   };
+}
+
+function basicGitAuth(token: string) {
+  return Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
 }
 
 function httpsRemoteUrl(repo: GithubRepo) {
@@ -153,7 +168,23 @@ export function redactSecrets(value: string, token?: string) {
   return result;
 }
 
-function bearerTokenFromHeader(value: string | undefined) {
-  const match = value?.match(/^AUTHORIZATION:\s*bearer\s+(.+)$/i);
-  return match?.[1];
+function tokenFromAuthHeader(value: string | undefined) {
+  const bearerMatch = value?.match(/^AUTHORIZATION:\s*bearer\s+(.+)$/i);
+  if (bearerMatch) {
+    return bearerMatch[1];
+  }
+
+  const basicMatch = value?.match(/^AUTHORIZATION:\s*basic\s+(.+)$/i);
+  if (!basicMatch) {
+    return undefined;
+  }
+
+  try {
+    const decoded = Buffer.from(basicMatch[1]!, "base64").toString("utf8");
+    return decoded.startsWith("x-access-token:")
+      ? decoded.slice("x-access-token:".length)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
