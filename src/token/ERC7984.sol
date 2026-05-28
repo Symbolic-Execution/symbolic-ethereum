@@ -47,18 +47,18 @@ abstract contract ERC7984 is IERC7984 {
         return _name;
     }
 
-    /// @notice Returns a URI for contract-level metadata.
-    /// @dev Empty by default; implementers may override.
-    function contractURI() public view virtual returns (string memory) {
-        return "";
-    }
-
     function symbol() external view returns (string memory) {
         return _symbol;
     }
 
     function decimals() external pure returns (uint8) {
         return 18;
+    }
+
+    /// @notice Returns a URI for contract-level metadata.
+    /// @dev Empty by default; implementers may override.
+    function contractURI() public view virtual returns (string memory) {
+        return "";
     }
 
     // ── Balances ────────────────────────────────────────────────────────
