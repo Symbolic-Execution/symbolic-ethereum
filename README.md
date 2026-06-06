@@ -9,6 +9,10 @@ This package contains:
 - `SymVM`: an on-chain symbolic handle registry and operation event surface
 - `SYM`: a typed Solidity library for calling `SymVM`
 - `ERC7984`: a draft confidential fungible token built on `SYM`
+- `IDisclosureController`: a higher-level disclosure policy interface for
+  off-chain reads
+- `DisclosureController`: a reference storage helper for implementing that
+  policy
 
 ## Contracts
 
@@ -37,6 +41,14 @@ Each operation returns a fresh `bytes32` handle and emits `OperationRequestedV1`
 
 Balances and transfer amounts are private handles. Transfers express symbolic
 intent rather than revealing plaintext values.
+
+### `IDisclosureController`
+
+`IDisclosureController` is the higher-level standard that the coordinator uses
+to resolve the account authorized to approve off-chain disclosure for a handle.
+
+Reference higher-level contracts can inherit `DisclosureController` and update
+the controller mapping as they mint or rotate private handles.
 
 ## Testing
 
